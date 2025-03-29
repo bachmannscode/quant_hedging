@@ -21,17 +21,19 @@ def cumulative_theta_pnl(spot_timestamps, decay_per_interval=THETA_DECAY_PER_INT
     return df
 
 
-def cumulative_delta_pnl(spot_timestamps, hedge_trades, final_price, transaction_cost):
+def cumulative_delta_pnl(spot_data, hedge_trades, transaction_cost):
     total_pnl = 0
     long_position = 0
     long_avg_price = 0  # Weighted average buy price
     short_position = 0
     short_avg_price = 0  # Weighted average sell price
 
-    df = pd.DataFrame({TIMESTAMP: spot_timestamps, DELTA_PNL: None})
+    df = pd.DataFrame({TIMESTAMP: spot_data[TIMESTAMP], DELTA_PNL: None})
     hedge_idx = 0  # Index to track hedge trades
 
-    for i, timestamp in enumerate(spot_timestamps):
+    for i, row in spot_data.iterrows():
+        timestamp = row[TIMESTAMP]
+        current_price = row[CLOSE]
 
         # Process hedge trade if the timestamp matches
         if (
@@ -84,15 +86,14 @@ def cumulative_delta_pnl(spot_timestamps, hedge_trades, final_price, transaction
             total_pnl += trade_pnl - trade_cost
             hedge_idx += 1  # Move to the next hedge trade
 
-        df.loc[i, DELTA_PNL] = total_pnl
+        # Compute unrealized PnL for open positions at the current price
+        unrealized_pnl = 0
+        if long_position > 0:
+            unrealized_pnl = long_position * (current_price - long_avg_price)
+        if short_position > 0:
+            unrealized_pnl = short_position * (short_avg_price - current_price)
 
-    # Add unrealized PnL at final price
-    if long_position > 0:
-        total_pnl += long_position * (final_price - long_avg_price)
-    if short_position > 0:
-        total_pnl += short_position * (short_avg_price - final_price)
-
-    df.loc[df.index[-1], DELTA_PNL] = total_pnl  # Ensure final timestamp has final PnL
+        df.loc[i, DELTA_PNL] = total_pnl + unrealized_pnl
 
     return df
 
@@ -116,9 +117,8 @@ def compute_all_pnls(
     result = {}
     for threshold, hedge_trades in hedge_trades_per_threshold.items():
         delta_pnl = cumulative_delta_pnl(
-            spot_data[TIMESTAMP],
+            spot_data,
             hedge_trades,
-            spot_data[CLOSE].iloc[-1],
             transaction_cost,
         )
 
